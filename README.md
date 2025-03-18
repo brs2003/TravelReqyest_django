@@ -1,2 +1,2 @@
-# TravelReqyest_django
+# TravelRequest_django
 Backend for travel request app.
