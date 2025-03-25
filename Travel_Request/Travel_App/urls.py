@@ -4,7 +4,7 @@ from rest_framework.authtoken.views import obtain_auth_token
 
 
 urlpatterns = [
-    path('adminlogin/', admin_login,name='admin_login'),
+    path('admin_login/', admin_login,name='admin_login'),
     path('admin/', add_admin),
 
     path('employee_login/', employee_login,name='employee_login') ,# Get Token

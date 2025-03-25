@@ -64,6 +64,7 @@ def employee_dashboard(request):
         logger.error(f"No requests found for employee: {user.username}")
         return Response({"error": "No requests found"}, status=status.HTTP_404_NOT_FOUND) 
 
+@csrf_exempt
 @api_view(['POST'])
 @permission_classes([IsAuthenticated, IsEmployeeUser])
 def new_travel_request(request):
@@ -113,29 +114,33 @@ def new_travel_request(request):
         logger.error(f"Error creating travel request for employee: {user.username} - {str(e)}")
         return Response({"status": "failed", "message": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-
 # Edit Travel Request
 @api_view(['PUT'])
 @permission_classes([IsAuthenticated, IsEmployeeUser])
 def edit_travel_request(request, request_id):
     try:
         user = request.user
+        # Validate Employee
         employee = Employee.objects.filter(user_auth=user).first()
         if not employee:
             logger.error(f"Invalid Employee for user: {user.username}")
             return Response({"status": "failed", "message": "Invalid Employee"}, status=status.HTTP_404_NOT_FOUND)
 
-        travel_request = get_object_or_404(Employee_Request, id=request_id, employee=employee)
+        # Validate Travel Request
+        travel_request = Employee_Request.objects.filter(id=request_id, employee=employee).first()
+        if not travel_request:
+            logger.error(f"Travel request {request_id} not found for employee: {user.username}")
+            return Response({"status": "failed", "message": "Travel request not found"}, status=status.HTTP_404_NOT_FOUND)
 
+        # Update Travel Request
         data = request.data
         serializer = EmployeeTableSerializer(travel_request, data=data, partial=True)
-
         if serializer.is_valid():
             serializer.save()
             logger.info(f"Travel request {request_id} updated by employee: {user.username}")
-            return Response({"message": "Travel request updated successfully", "updated_data": serializer.data}, status=HTTP_200_OK)
+            return Response({"status": "success", "message": "Travel request updated successfully", "updated_data": serializer.data}, status=HTTP_200_OK)
         logger.error(f"Error updating travel request {request_id} - {serializer.errors}")
-        return Response(serializer.errors, status=HTTP_400_BAD_REQUEST)
+        return Response({"status": "failed", "message": serializer.errors}, status=HTTP_400_BAD_REQUEST)
 
     except Exception as e:
         logger.error(f"Error updating travel request {request_id} for employee: {user.username} - {str(e)}")
@@ -148,26 +153,28 @@ def edit_travel_request(request, request_id):
 def delete_travel_request(request, request_id):
     try:
         user = request.user
+        # Validate Employee
         employee = Employee.objects.filter(user_auth=user).first()
         if not employee:
-            """
-            Authenticate a manager and return a token if credentials are valid.
-            """
-        if request.method == 'POST':
-            data = json.loads(request.body)
-            user = authenticate(username=data['username'], password=data['password'])
-            if user is not None and hasattr(user, 'manager'):
-                token, created = Token.objects.get_or_create(user=user)
-                logger.info(f"Manager {user.username} logged in successfully.")
-                return JsonResponse({'status': 'success', 'token': token.key})
-            logger.warning(f"Failed login attempt for username: {data['username']}")
-            return JsonResponse({'status': 'failed', 'message': 'Invalid credentials'}, status=401)
-        logger.error("Invalid request method for manager_login")
-        return JsonResponse({'status': 'failed', 'message': 'Invalid request method'}, status=400)
-    except Employee.DoesNotExist:
-        logger.error(f"Invalid Employee for user: {user.username}")
-        return Response({"status": "failed", "message": "Invalid Employee"}, status=status.HTTP_404_NOT_FOUND)    
+            logger.error(f"Invalid Employee for user: {user.username}")
+            return Response({"status": "failed", "message": "Invalid Employee"}, status=status.HTTP_404_NOT_FOUND)
 
+        # Validate Travel Request
+        travel_request = Employee_Request.objects.filter(id=request_id, employee=employee).first()
+        if not travel_request:
+            logger.error(f"Travel request {request_id} not found for employee: {user.username}")
+            return Response({"status": "failed", "message": "Travel request not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        # Delete Travel Request
+        travel_request.delete()
+        logger.info(f"Travel request {request_id} deleted by employee: {user.username}")
+        return Response({"status": "success", "message": "Travel request deleted successfully"}, status=HTTP_200_OK)
+
+    except Exception as e:
+        logger.error(f"Error deleting travel request {request_id} for employee: {user.username} - {str(e)}")
+        return Response({"status": "failed", "message": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        
 @csrf_exempt
 @api_view(['POST'])
 @permission_classes([AllowAny])
@@ -183,8 +190,6 @@ def manager_login(request):
             return JsonResponse({'status': 'success', 'token': token.key})
         return JsonResponse({'status': 'failed', 'message': 'Invalid credentials'}, status=401)
     return JsonResponse({'status': 'failed', 'message': 'Invalid request method'}, status=400)
-
-# Manager Dashboard
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def manager_dashboard(request):
@@ -192,68 +197,82 @@ def manager_dashboard(request):
         # Fetch the Manager instance linked to the authenticated user
         manager = Manager.objects.get(user_auth=request.user)
 
-        # Get all employee requests assigned to this manager
-        history_list = Employee_Request.objects.filter(manager=manager).select_related("employee")
+        # Get all employees under this manager
+        employees = Employee.objects.filter(manager=manager)
+
+        # If no employees are assigned to this manager, return an empty list
+        if not employees.exists():
+            logger.info(f"Manager {request.user.username} has no employees assigned.")
+            return Response([], status=HTTP_200_OK)  # ✅ Return an empty list
+
+        # Get all travel requests assigned to these employees
+        history_list = Employee_Request.objects.filter(employee__in=employees).select_related("employee")
 
         # If no requests exist, return an empty list
         if not history_list.exists():
             logger.info(f"Manager {request.user.username} has no assigned travel requests.")
-            return Response({'status': 'success', 'data': []}, status=HTTP_200_OK)
+            return Response([], status=HTTP_200_OK)  # ✅ Return an empty list
 
         # Serialize the data
         serializer = ManagerTableSerializer(history_list, many=True)
 
         logger.info(f"Manager {request.user.username} accessed their dashboard successfully.")
-        return Response({'status': 'success', 'data': serializer.data}, status=HTTP_200_OK)
+        return Response(serializer.data, status=HTTP_200_OK)  # ✅ Return data directly
 
     except Manager.DoesNotExist:
         logger.error(f"Manager record not found for user {request.user.username}")
-        return Response({'status': 'failed', 'message': 'Manager record not found'}, status=HTTP_404_NOT_FOUND)
+        return Response({'error': 'Manager record not found'}, status=HTTP_404_NOT_FOUND)
 
     except Exception as e:
         logger.error(f"Error accessing manager dashboard: {str(e)}")
-        return Response({'status': 'failed', 'message': str(e)}, status=HTTP_500_INTERNAL_SERVER_ERROR)
-
-
+        return Response({'error': str(e)}, status=HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated, IsManagerUser])
+@permission_classes([IsAuthenticated])
 def filter_sort_search(request):
-    manager_id = request.query_params.get("id")
-    employee_name = request.query_params.get("employee_name")
-    employee_id = request.query_params.get("employee_id")
-    start_date = request.query_params.get("start_date")
-    end_date = request.query_params.get("end_date")
-    status_filter = request.query_params.get("status")
-    sort_by = request.query_params.get("sort_by", "date_of_sub")
+    """Filters and sorts Employee Requests based on query parameters"""
+    
+    # Get filter parameters from request
+    first_name = request.query_params.get("first_name", "").strip()
+    last_name = request.query_params.get("last_name", "").strip()
+    employee_id = request.query_params.get("employee_id", "").strip()
+    start_date = request.query_params.get("start_date", "").strip()
+    end_date = request.query_params.get("end_date", "").strip()
+    manager_status = request.query_params.get("manager_status", "").strip()
+    admin_status = request.query_params.get("admin_status", "").strip()
+    sort_field = request.query_params.get("sort_field", "date_of_sub").strip()
+    sort_order = request.query_params.get("sort_order", "asc").strip()
 
-    if not manager_id:
-        logger.error("Manager ID is required for filter_sort_search")
-        return Response({"status": "error", "message": "Manager ID is required"}, status=status.HTTP_400_BAD_REQUEST)
+    # Start with all records
+    queryset = Employee_Request.objects.all()
 
-    history_list = Employee_Request.objects.filter(manager=manager_id).select_related("employee")
-
-    if employee_name:
-        history_list = history_list.filter(
-            Q(employee__first_name__icontains=employee_name) |
-            Q(employee__last_name__icontains=employee_name)
-        )
+    # Apply filters
+    if first_name:
+        queryset = queryset.filter(employee__first_name__icontains=first_name)
+    if last_name:
+        queryset = queryset.filter(employee__last_name__icontains=last_name)
     if employee_id:
-        history_list = history_list.filter(employee__id=employee_id)
-    if start_date and end_date:
-        history_list = history_list.filter(from_date__gte=start_date, to_date__lte=end_date)
-    if status_filter:
-        history_list = history_list.filter(manager_status=status_filter)
+        queryset = queryset.filter(employee__id=employee_id)
+    if start_date:
+        queryset = queryset.filter(from_date__gte=start_date)
+    if end_date:
+        queryset = queryset.filter(to_date__lte=end_date)
+    if manager_status:
+        queryset = queryset.filter(manager_status=manager_status)
+    if admin_status:
+        queryset = queryset.filter(admin_status=admin_status)
 
-    valid_sort_fields = ["date_of_sub", "from_date", "to_date", "manager_status"]
-    if sort_by in valid_sort_fields:
-        history_list = history_list.order_by(sort_by)
+    # Sorting logic
+    if sort_field in ["date_of_sub", "from_date", "to_date", "first_name", "last_name"]:
+        if sort_order == "desc":
+            sort_field = f"-{sort_field}"
+        queryset = queryset.order_by(sort_field)
 
-    serializer = ManagerTableSerializer(history_list, many=True)
-    logger.info(f"Manager {request.user.username} performed a filter/sort/search operation.")
-    return Response(serializer.data, status=status.HTTP_200_OK)
+    # Serialize and return filtered/sorted data
+    serializer = EmployeeTableSerializer(queryset, many=True)
+    return Response(serializer.data)
 
-@api_view(["POST"])
+@api_view(["PUT"])
 @permission_classes([IsAuthenticated, IsManagerUser])
 def manager_status_update(request):
     try:
@@ -279,7 +298,7 @@ def manager_status_update(request):
             logger.warning(f"Unauthorized status update attempt by manager {manager_id} for ticket {ticket_id}")
             return JsonResponse({'status': 'error', 'message': 'Unauthorized: You can only manage requests assigned to you', 'data': None}, status=403)
 
-        valid_statuses = ["Approved", "Canceled", "Pending"]
+        valid_statuses = ["Approved", "Declined", "Pending", "OnProgress"]
         if manager_status not in valid_statuses:
             logger.error(f"Invalid status {manager_status} provided by manager {manager_id} for ticket {ticket_id}")
             return JsonResponse({'status': 'error', 'message': 'Invalid status. Choose from Approved, Canceled, or Pending.', 'data': None}, status=400)
@@ -634,7 +653,8 @@ def admin_status_update(request):
 def close_ticket(request):
     try:
         data = json.loads(request.body)
-        ticket_id = data.get('ticket_id')
+        ticket_id = data.get("ticket_id")
+        admin_note = data.get("admin_note", "").strip()
 
         # Ensure ticket exists
         try:
@@ -642,64 +662,85 @@ def close_ticket(request):
         except Employee_Request.DoesNotExist:
             logger.error(f"Ticket {ticket_id} not found.")
             return JsonResponse({
-                'status': 'error',
-                'message': 'Ticket not found',
-                'data': None
+                "status": "error",
+                "message": "Ticket not found",
+                "data": None
             }, status=404)
 
-        # Check if the request is approved by the manager before closing
+        # Admin can only close requests that are approved by the manager
         if ticket.manager_status != "Approved":
-            logger.warning(f"Attempt to close unapproved ticket {ticket_id}")
             return JsonResponse({
-                'status': 'error',
-                'message': 'Only approved requests can be closed',
-                'data': {
-                    'ticket_id': ticket.id,
-                    'manager_status': ticket.manager_status,
-                    'admin_status': ticket.admin_status
+                "status": "error",
+                "message": "Only approved requests can be closed",
+                "data": {
+                    "ticket_id": ticket.id,
+                    "manager_status": ticket.manager_status,
+                    "admin_status": ticket.admin_status
                 }
             }, status=400)
 
-        # Update ticket status
+        # If admin_status is already "Closed", allow updating the admin note
+        if ticket.admin_status == "Closed":
+            if not admin_note:
+                return JsonResponse({
+                    "status": "error",
+                    "message": "Admin note is required for closed tickets",
+                    "data": None
+                }, status=400)
+            ticket.admin_note = admin_note
+            ticket.save()
+            return JsonResponse({
+                "status": "success",
+                "message": "Admin note updated for closed ticket",
+                "data": {
+                    "ticket_id": ticket.id,
+                    "admin_status": ticket.admin_status,
+                    "admin_note": ticket.admin_note
+                }
+            }, status=200)
+
+        # Otherwise, close the ticket
         ticket.admin_status = "Closed"
+        ticket.admin_note = admin_note if admin_note else "No additional notes."
         ticket.save()
-        logger.info(f"Ticket {ticket_id} closed successfully.")
+        
+        # Send email notification
         send_mail(
-            'Travel Request Closed',
-            f'Your travel request with ID {ticket.id} has been closed.',
-            'inudlekshmi@example.com',
+            "Travel Request Closed",
+            f"Your travel request with ID {ticket.id} has been closed. Note: {ticket.admin_note}",
+            "admin@example.com",
             [ticket.employee.email],            
             fail_silently=False,
         )
 
         return JsonResponse({
-            'status': 'success',
-            'message': 'Ticket closed successfully',
-            'data': {
-                'ticket_id': ticket.id,
-                'employee_id': ticket.employee_id.id,
-                'manager_id': ticket.manager_id.id,
-                'manager_status': ticket.manager_status,
-                'admin_status': ticket.admin_status,
-                'admin_note': ticket.admin_note
+            "status": "success",
+            "message": "Ticket closed successfully",
+            "data": {
+                "ticket_id": ticket.id,
+                "employee_id": ticket.employee.id,
+                "manager_id": ticket.manager.id,
+                "manager_status": ticket.manager_status,
+                "admin_status": ticket.admin_status,
+                "admin_note": ticket.admin_note
             }
         }, status=200)
-    
+
     except json.JSONDecodeError:
-        logger.error("Invalid JSON format in close_ticket")
         return JsonResponse({
-            'status': 'error',
-            'message': 'Invalid JSON format',
-            'data': None
+            "status": "error",
+            "message": "Invalid JSON format",
+            "data": None
         }, status=400)
-    
+
     except Exception as e:
         logger.error(f"Error in close_ticket: {str(e)}")
         return JsonResponse({
-            'status': 'error',
-            'message': str(e),
-            'data': None
+            "status": "error",
+            "message": str(e),
+            "data": None
         }, status=500)
+
 
 
 @api_view(['GET'])

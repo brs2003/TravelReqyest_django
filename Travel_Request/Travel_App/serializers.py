@@ -29,6 +29,15 @@ class ManagerTableSerializer(serializers.ModelSerializer):
             "to_date",
             "purpose",
             "manager_status",
+            "from_loc",
+            "to_loc",
+            "travel_mode",
+            "lodging_required",
+            "additional_request",
+            "manager_note",
+            "admin_note",
+            "admin_status",
+            
         ]     
         
 
@@ -43,7 +52,7 @@ class EmployeeTableSerializer(serializers.ModelSerializer):
     manager=ManagerNameSerializer(read_only=True)  # Nested Manager Data
     class Meta:
         model = Employee_Request        
-        fields = ['employee_id','from_date','to_date','purpose','manager_note','admin_note','manager_status','manager']
+        fields = ['id','employee_id','from_date','to_date','purpose','manager_note','admin_note','manager_status','manager','from_loc','to_loc','travel_mode','lodging_required','additional_request','admin_status']
 
 class AdminTableSerializer(serializers.ModelSerializer):
     employee = EmployeeNameSerializer(read_only=True)  # Nested Employee Data
@@ -59,7 +68,15 @@ class AdminTableSerializer(serializers.ModelSerializer):
             "from_date",
             "to_date",
             "purpose",
-            "manager_status"
+            "manager_status",
+            "from_loc",
+            "to_loc",
+            "travel_mode",
+            "lodging_required",
+            "additional_request",
+            "admin_note",
+            "admin_status",
+            "no_of_resub"
         ]
 
 class ManagerSerializer(serializers.ModelSerializer):
@@ -71,6 +88,7 @@ class EmployeeSerializer(serializers.ModelSerializer):
     class Meta:
         model = Employee
         fields = '__all__'        
+
 
 
 
